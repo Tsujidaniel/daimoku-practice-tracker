@@ -435,8 +435,7 @@ class Component extends DCLogic {
       const s = JSON.parse(localStorage.getItem(this.userKey('sessions', email)) || 'null');
       const g = JSON.parse(localStorage.getItem(this.userKey('goals', email)) || 'null');
       const pg = JSON.parse(localStorage.getItem(this.userKey('personal_goals', email)) || 'null');
-      if (s && s.length) this.setState({ sessions: s });
-      else { const seeded = this.seedSessions(); this.setState({ sessions: seeded }); this.persistSessions(seeded, email); }
+      this.setState({ sessions: s || [] });
       this.setState({ goals: g || { daily: 20, weekly: 120, streak: 7 }, personalGoals: pg || [] });
     } catch (e) {}
   }
@@ -470,9 +469,8 @@ class Component extends DCLogic {
     localStorage.setItem('daimoku_current_user', email);
     this.setState({ currentUser: email, authEmail: '', authPassword: '', authError: '', view: 'home' });
     if (isNew) {
-      const seeded = this.seedSessions();
-      this.setState({ sessions: seeded, goals: { daily: 20, weekly: 120, streak: 7 }, personalGoals: [] });
-      this.persistSessions(seeded, email);
+      this.setState({ sessions: [], goals: { daily: 20, weekly: 120, streak: 7 }, personalGoals: [] });
+      this.persistSessions([], email);
     } else {
       this.loadUserData(email);
     }
@@ -486,18 +484,6 @@ class Component extends DCLogic {
   }
 
   componentWillUnmount() { this.clearTimers(); clearTimeout(this._toastTimer); }
-
-  seedSessions() {
-    const out = [];
-    const now = new Date();
-    const mins = [15, 0, 20, 10, 25, 15, 30, 0, 20, 10, 0, 15];
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now); d.setDate(d.getDate() - i);
-      const m = mins[11 - i];
-      if (m > 0) out.push({ id: 'seed' + i, minutes: m, date: d.toISOString() });
-    }
-    return out;
-  }
 
   persistSessions(sessions, email) { if (!(email || this.state.currentUser)) return; localStorage.setItem(this.userKey('sessions', email), JSON.stringify(sessions)); }
   persistGoals(goals, email) { if (!(email || this.state.currentUser)) return; localStorage.setItem(this.userKey('goals', email), JSON.stringify(goals)); }
