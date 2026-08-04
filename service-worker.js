@@ -1,5 +1,5 @@
 // Bump this when any precached file changes so clients pick up the update.
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const CACHE_NAME = "daimoku-" + CACHE_VERSION;
 
 const PRECACHE_URLS = [

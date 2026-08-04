@@ -426,6 +426,16 @@ class Component extends DCLogic {
         this.loadUserData(savedUser);
       }
     } catch (e) {}
+    // setInterval ticks get throttled/suspended while the screen is off or the
+    // tab is backgrounded, so the timer is anchored to real timestamps (below)
+    // instead of counting ticks. This snaps the displayed time back in sync
+    // the moment the screen wakes, rather than waiting up to a second.
+    this._onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && this.state.view === 'timerRunning' && !this.state.paused) {
+        this.setState({ elapsedSeconds: this.computeElapsedSeconds() });
+      }
+    };
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
   }
 
   userKey(kind, email) { return 'daimoku_' + kind + '_' + (email || this.state.currentUser || '').toLowerCase(); }
@@ -483,7 +493,11 @@ class Component extends DCLogic {
     this.setState({ currentUser: null, sessions: [], goals: { daily: 20, weekly: 120, streak: 7 }, personalGoals: [], view: 'home', authMode: 'login', authEmail: '', authPassword: '', authError: '' });
   }
 
-  componentWillUnmount() { this.clearTimers(); clearTimeout(this._toastTimer); }
+  componentWillUnmount() {
+    this.clearTimers();
+    clearTimeout(this._toastTimer);
+    document.removeEventListener('visibilitychange', this._onVisibilityChange);
+  }
 
   persistSessions(sessions, email) { if (!(email || this.state.currentUser)) return; localStorage.setItem(this.userKey('sessions', email), JSON.stringify(sessions)); }
   persistGoals(goals, email) { if (!(email || this.state.currentUser)) return; localStorage.setItem(this.userKey('goals', email), JSON.stringify(goals)); }
@@ -532,9 +546,12 @@ class Component extends DCLogic {
 
   beginSession() {
     this.clearTimers();
+    this._startedAt = Date.now();
+    this._pausedAccumMs = 0;
+    this._pauseBeganAt = null;
     this.setState({ view: 'timerRunning', elapsedSeconds: 0, paused: false, quoteIndex: 0, quoteVisible: true, showEndDialog: false });
     this._tick = setInterval(() => {
-      if (!this.state.paused) this.setState(s => ({ elapsedSeconds: s.elapsedSeconds + 1 }));
+      if (!this.state.paused) this.setState({ elapsedSeconds: this.computeElapsedSeconds() });
     }, 1000);
     this._quoteTick = setInterval(() => {
       this.setState({ quoteVisible: false });
@@ -545,7 +562,34 @@ class Component extends DCLogic {
     }, 9000);
   }
 
-  togglePause() { this.setState(s => ({ paused: !s.paused })); }
+  // Elapsed time is derived from real timestamps rather than counted in
+  // 1-per-tick increments, so it stays accurate even if setInterval ticks
+  // get delayed, throttled, or skipped entirely (e.g. screen off / tab
+  // backgrounded on mobile) — it catches up instead of drifting behind.
+  computeElapsedSeconds() {
+    return Math.max(0, Math.floor((Date.now() - this._startedAt - this._pausedAccumMs) / 1000));
+  }
+
+  // Shared by every path that pauses/resumes the timer (manual pause button,
+  // and the stop-confirmation dialog) so _pausedAccumMs always reflects real
+  // paused time, no matter which one triggered it.
+  pauseTimer() { if (this._pauseBeganAt == null) this._pauseBeganAt = Date.now(); }
+  resumeTimer() {
+    if (this._pauseBeganAt != null) {
+      this._pausedAccumMs += Date.now() - this._pauseBeganAt;
+      this._pauseBeganAt = null;
+    }
+  }
+
+  togglePause() {
+    if (this.state.paused) {
+      this.resumeTimer();
+      this.setState({ paused: false, elapsedSeconds: this.computeElapsedSeconds() });
+    } else {
+      this.pauseTimer();
+      this.setState({ paused: true });
+    }
+  }
 
   clearTimers() {
     clearInterval(this._tick); clearInterval(this._quoteTick); clearTimeout(this._quoteSwap);
@@ -554,9 +598,13 @@ class Component extends DCLogic {
 
   requestStop() {
     if (this.state.elapsedSeconds < 5) { this.endSession(false); return; }
+    this.pauseTimer();
     this.setState({ paused: true, showEndDialog: true });
   }
-  cancelEndDialog() { this.setState({ showEndDialog: false, paused: false }); }
+  cancelEndDialog() {
+    this.resumeTimer();
+    this.setState({ showEndDialog: false, paused: false, elapsedSeconds: this.computeElapsedSeconds() });
+  }
   confirmEnd() { this.endSession(true); }
 
   endSession(save) {
